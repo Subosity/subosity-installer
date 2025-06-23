@@ -18,7 +18,7 @@ gantt
     title Subosity Installer Development Timeline
     dateFormat  YYYY-MM-DD
     section Phase 1: Foundation
-    Core Installation      :p1-1, 2025-01-01, 30d
+    Core Installation      :p1-1, 2025-07-01, 30d
     Basic Validation      :p1-2, after p1-1, 14d
     Docker Integration    :p1-3, after p1-1, 21d
     Supabase Setup       :p1-4, after p1-2, 14d
