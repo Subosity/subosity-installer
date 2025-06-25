@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/nginx:/etc/nginx/conf.d:ro
+      - ./certs:/etc/ssl/certs:ro
+    depends_on:
+      - frontend
+    restart: unless-stopped
+    networks:
+      - subosity-network
+      - supabase_default
+
+  frontend:
+    image: node:18-alpine
+    working_dir: /app
+    environment:
+      - NODE_ENV={{.Environment}}
+      - DOMAIN={{.Domain}}
+      - SUPABASE_URL=http://supabase-kong:8000
+      - SUPABASE_ANON_KEY={{.SupabaseAnonKey}}
+    volumes:
+      - ./app/frontend:/app
+    command: ["sh", "-c", "npm install && npm run dev"]
+    restart: unless-stopped
+    networks:
+      - subosity-network
+      - supabase_default
+
+networks:
+  subosity-network:
+    driver: bridge
+  supabase_default:
+    external: true

@@ -4,7 +4,28 @@ A turnkey, production-ready deployment tool for self-hosting the Subosity applic
 
 ## ⚡ Quick Start
 
-### Binary Installation (Recommended)
+### One-Line Installation (Recommended)
+
+```bash
+# Production installation
+curl -fsSL https://install.subosity.com | bash -s -- --env prod --domain mysubosity.com --email admin@example.com
+
+# Development installation  
+curl -fsSL https://install.subosity.com | bash -s -- --env dev --domain localhost.local --email dev@example.com
+```
+
+### Manual Installation
+
+```bash
+# Download the setup script
+curl -fsSL https://raw.githubusercontent.com/subosity/subosity-installer/main/setup.sh -o setup.sh
+chmod +x setup.sh
+
+# Run installation
+./setup.sh --env prod --domain mysubosity.com --email admin@example.com
+```
+
+### Binary Installation (Advanced)
 
 ```bash
 # Download and verify latest release
@@ -14,26 +35,8 @@ sha256sum -c subosity-installer.sha256
 
 # Make executable and install
 chmod +x subosity-installer
-./subosity-installer setup --env prod --domain mysubosity.com --email admin@example.com
-```
-
-### Container-Based Installation
-
-```bash
-docker run --rm \
-  -v /opt/subosity:/app \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  subosity/installer:latest setup \
-    --env prod \
-    --domain mysubosity.com \
-    --email admin@example.com
-```
-
-### One-Line Installation (Advanced Users)
-
-```bash
-# Direct execution (downloads, verifies, and runs)
-curl -fsSL https://install.subosity.com | bash -s -- --env prod --domain mysubosity.com --email admin@example.com
+sudo mv subosity-installer /usr/local/bin/
+subosity-installer setup --env prod --domain mysubosity.com --email admin@example.com
 ```
 
 ## 🎯 What It Does

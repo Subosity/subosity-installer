@@ -1,0 +1,133 @@
+# golangci-lint configuration
+# Documentation: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: readonly
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    
+  govet:
+    check-shadowing: true
+    
+  gocyclo:
+    min-complexity: 10
+    
+  dupl:
+    threshold: 100
+    
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    
+  misspell:
+    locale: US
+    
+  lll:
+    line-length: 120
+    
+  goimports:
+    local-prefixes: github.com/subosity/subosity-installer
+    
+  gocritic:
+    enabled-tags:
+      - performance
+      - style
+      - experimental
+    disabled-checks:
+      - wrapperFunc
+      - dupImport
+      
+  funlen:
+    lines: 100
+    statements: 50
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - varcheck
+    - structcheck
+    - deadcode
+    - gocyclo
+    - gofmt
+    - goimports
+    - misspell
+    - lll
+    - goconst
+    - gocritic
+    - gocognit
+    - bodyclose
+    - gosec
+    - interfacer
+    - unconvert
+    - dupl
+    - gomodguard
+    - goprintffuncname
+    - gomnd
+    - exportloopref
+    - funlen
+    - gochecknoinits
+    - gochecknoglobals
+    - godox
+    - prealloc
+    - scopelint
+    - stylecheck
+    - asciicheck
+    - gofumpt
+    - godot
+    - nestif
+    - testpackage
+    - wsl
+
+  disable:
+    - maligned # deprecated
+    - interfacer # deprecated
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - funlen
+        - gocognit
+        - gochecknoglobals
+        
+    # Exclude known linters from partially hard-to-fix issues
+    - path: cmd/
+      linters:
+        - gochecknoglobals
+        
+    # Exclude shadow checking on err variables
+    - text: "shadow: declaration of \"err\""
+      linters:
+        - govet
+        
+    # Exclude magic number checks for common values
+    - text: "mnd: Magic number: [0-9]+"
+      linters:
+        - gomnd
+      source: "(time\\.Second|time\\.Minute|time\\.Hour|1024|0755|0644)"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
