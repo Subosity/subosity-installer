@@ -240,7 +240,7 @@ func (d *Detector) validatePortAvailability(ctx context.Context) error {
 				fmt.Sprintf("Port %d is already in use", port),
 				[]string{
 					fmt.Sprintf("Stop the service using port %d", port),
-					"Use 'sudo netstat -tlnp | grep :%d' to identify the process", port,
+					fmt.Sprintf("Use 'sudo netstat -tlnp | grep :%d' to identify the process", port),
 					"Consider changing the configuration to use different ports",
 				},
 			)

@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/subosity/subosity-installer/pkg/errors"
 	"github.com/subosity/subosity-installer/pkg/logger"

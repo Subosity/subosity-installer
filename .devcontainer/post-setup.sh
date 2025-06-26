@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Post-setup script for Subosity Installer dev container
-# Installs specified Go version using gvm and sets up development tools
+# Sets up Go development environment using pre-installed GVM
 
 set -euo pipefail
 
@@ -16,63 +16,66 @@ RESET='\033[0m'
 
 # --- Configuration ---
 GO_VERSION="${GO_VERSION:-1.23.4}"
-GVM_ROOT="${GVM_ROOT:-$HOME/.gvm}"
+GVM_ROOT="$HOME/.gvm"
 
 echo -e "${CYAN}[*] Starting Subosity Installer dev environment setup${RESET}"
 
-# Check if running in dev container
-if [[ "${SUBOSITY_DEV_MODE:-false}" != "true" ]]; then
-    echo -e "${YELLOW}[!] Not running in dev container mode - skipping setup${RESET}"
-    exit 0
+# Start Docker daemon if not running
+if ! docker info > /dev/null 2>&1; then
+    echo -e "${CYAN}[*] Starting Docker daemon...${RESET}"
+    sudo service docker start
+    sleep 3
+    echo -e "${GREEN}[+] Docker started successfully${RESET}"
+else
+    echo -e "${GREEN}[+] Docker already running${RESET}"
 fi
 
-# --- Start Docker Daemon (DinD setup) ---
-echo -e "${GREEN}[+] Starting Docker daemon${RESET}"
-if ! pgrep dockerd > /dev/null; then
-  sudo nohup dockerd > /tmp/dockerd.log 2>&1 &
-  sleep 5
-  echo -e "${BLUE}[i] Docker started successfully${RESET}"
-else
-  echo -e "${BLUE}[i] Docker already running${RESET}"
-fi
+# Set up locale
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
 
-# Source gvm if available
-if [[ -f "$GVM_ROOT/scripts/gvm" ]]; then
-    echo -e "${CYAN}[*] Loading Go Version Manager${RESET}"
-    source "$GVM_ROOT/scripts/gvm"
-else
-    echo -e "${RED}[-] Go Version Manager not found at $GVM_ROOT${RESET}"
-    echo -e "${YELLOW}[!] Attempting to install gvm...${RESET}"
-    
-    # Install gvm if not present
-    curl -s -S -L https://raw.githubusercontent.com/moovweb/gvm/master/binscripts/gvm-installer | bash
-    source "$GVM_ROOT/scripts/gvm"
-fi
+# Load GVM (pre-installed in Dockerfile)
+echo -e "${CYAN}[*] Loading Go Version Manager${RESET}"
+# Temporarily relax error handling for GVM (it has some unbound variables)
+set +euo pipefail
+source "$GVM_ROOT/scripts/gvm" >/dev/null 2>&1 || true
+set -euo pipefail
 
 # Install specified Go version
-echo -e "${CYAN}[*] Installing Go $GO_VERSION using gvm${RESET}"
+echo -e "${CYAN}[*] Installing Go $GO_VERSION${RESET}"
+set +euo pipefail
 
 # Check if Go version is already installed
-if gvm list | grep -q "go$GO_VERSION"; then
+if gvm list 2>/dev/null | grep -q "go$GO_VERSION"; then
     echo -e "${GREEN}[+] Go $GO_VERSION already installed${RESET}"
 else
     echo -e "${CYAN}[*] Installing Go $GO_VERSION...${RESET}"
-    if ! gvm install "go$GO_VERSION" --binary; then
+    # Try binary installation first
+    if gvm install "go$GO_VERSION" --binary >/dev/null 2>&1; then
+        echo -e "${GREEN}[+] Go $GO_VERSION installed via binary${RESET}"
+    else
         echo -e "${YELLOW}[!] Binary installation failed, trying source compilation...${RESET}"
-        # Install Go 1.20 first as bootstrap for newer versions
-        if ! gvm list | grep -q "go1.20"; then
-            gvm install go1.20 --binary
+        # Install bootstrap Go if needed
+        if ! gvm list 2>/dev/null | grep -q "go1.20"; then
+            gvm install go1.20 --binary >/dev/null 2>&1 || {
+                echo -e "${RED}[-] Failed to install bootstrap Go 1.20${RESET}"
+                exit 1
+            }
         fi
-        gvm use go1.20
-        gvm install "go$GO_VERSION"
+        gvm use go1.20 >/dev/null 2>&1
+        gvm install "go$GO_VERSION" >/dev/null 2>&1 || {
+            echo -e "${RED}[-] Failed to install Go $GO_VERSION${RESET}"
+            exit 1
+        }
+        echo -e "${GREEN}[+] Go $GO_VERSION installed via source${RESET}"
     fi
 fi
 
-# Use the specified Go version as default
-echo -e "${CYAN}[*] Setting Go $GO_VERSION as default${RESET}"
-gvm use "go$GO_VERSION" --default
+# Set as default version
+gvm use "go$GO_VERSION" --default >/dev/null 2>&1
+set -euo pipefail
 
-# Update environment variables for current session
+# Update environment for current session
 export GOROOT="$GVM_ROOT/gos/go$GO_VERSION"
 export GOPATH="/go"
 export PATH="$GOROOT/bin:$GOPATH/bin:$PATH"
@@ -80,145 +83,179 @@ export PATH="$GOROOT/bin:$GOPATH/bin:$PATH"
 # Verify Go installation
 echo -e "${CYAN}[*] Verifying Go installation${RESET}"
 go_version=$(go version)
-echo -e "${GRAY}    $go_version${RESET}"
+echo -e "${GREEN}[+] $go_version${RESET}"
 
-# Install Go development tools with proper versions
+# Install Go development tools
 echo -e "${CYAN}[*] Installing Go development tools${RESET}"
-
-# Create GOPATH bin directory if it doesn't exist
 mkdir -p "$GOPATH/bin"
 
-# Install tools with error handling
-install_go_tool() {
-    local tool="$1"
-    local package="$2"
-    
-    echo -e "${GRAY}    Installing $tool...${RESET}"
-    if go install "$package"; then
-        echo -e "${GREEN}[+] Successfully installed $tool${RESET}"
+tools=(
+    "goimports|golang.org/x/tools/cmd/goimports@latest"
+    "golangci-lint|github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+    "gosec|github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"
+    "govulncheck|golang.org/x/vuln/cmd/govulncheck@latest"
+    "gofumpt|mvdan.cc/gofumpt@latest"
+    "staticcheck|honnef.co/go/tools/cmd/staticcheck@latest"
+)
+
+for tool_info in "${tools[@]}"; do
+    tool_name="${tool_info%|*}"
+    tool_package="${tool_info#*|}"
+    echo -e "${GRAY}    Installing $tool_name...${RESET}"
+    if go install "$tool_package" >/dev/null 2>&1; then
+        echo -e "${GREEN}[+] $tool_name installed${RESET}"
     else
-        echo -e "${RED}[-] Failed to install $tool${RESET}"
-        return 1
-    fi
-}
-
-# Install core development tools
-install_go_tool "goimports" "golang.org/x/tools/cmd/goimports@latest"
-install_go_tool "golangci-lint" "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
-install_go_tool "gosec" "github.com/securecodewarrior/gosec/v2/cmd/gosec@latest"
-install_go_tool "govulncheck" "golang.org/x/vuln/cmd/govulncheck@latest"
-
-# Additional useful tools for the project
-install_go_tool "gofumpt" "mvdan.cc/gofumpt@latest"
-install_go_tool "staticcheck" "honnef.co/go/tools/cmd/staticcheck@latest"
-
-# Set up gvm environment for future shells
-echo -e "${CYAN}[*] Setting up gvm environment for future shells${RESET}"
-
-# Add comprehensive environment setup to .bashrc
-cat >> "$HOME/.bashrc" << 'EOF'
-
-# === Go Version Manager ===
-if [[ -s "$HOME/.gvm/scripts/gvm" ]]; then
-    source "$HOME/.gvm/scripts/gvm"
-    gvm use go1.23.4 &>/dev/null || true
-fi
-
-# === Development Aliases ===
-alias ll="ls -la"
-alias supa-start="supabase start"
-alias supa-stop="supabase stop"
-alias supa-db-reset="supabase db reset"
-alias supa-db-push="supabase db push"
-alias supa-functions-serve="supabase functions serve --env-file supabase/.env"
-
-# === Go Development Aliases ===
-alias go-build="go build -v ./..."
-alias go-test="go test -v ./..."
-alias go-test-coverage="go test -v -coverprofile=coverage.out ./... && go tool cover -html=coverage.out"
-alias go-lint="golangci-lint run"
-alias go-fmt="gofmt -s -w . && goimports -w ."
-alias go-tidy="go mod tidy"
-
-# === Installer Development Aliases ===
-alias installer-build="make build"
-alias installer-test="make test"
-alias installer-run="make run"
-alias installer-container="make build-container"
-
-show_help() {
-  echo
-  echo    "╔══════════════════════════════════════════════════════════════════════════════╗"
-  echo -e "║                          🚀 \033[36mSubosity Installer Dev Commands\033[0m                  ║"
-  echo    "╠══════════════════════════════════════════════════════════════════════════════╣"
-  echo -e "║  \033[32minstaller-build\033[0m      Build the installer binary                              ║"
-  echo -e "║  \033[32minstaller-test\033[0m       Run all tests with coverage                            ║"
-  echo -e "║  \033[32minstaller-run\033[0m        Run the installer for testing                          ║"
-  echo -e "║  \033[32minstaller-container\033[0m  Build the smart container image                        ║"
-  echo    "║                                                                              ║"
-  echo -e "║  \033[32mgo-build\033[0m             Build all Go packages                                  ║"
-  echo -e "║  \033[32mgo-test\033[0m              Run all tests                                          ║"
-  echo -e "║  \033[32mgo-test-coverage\033[0m     Run tests with coverage report                         ║"
-  echo -e "║  \033[32mgo-lint\033[0m              Run golangci-lint                                      ║"
-  echo -e "║  \033[32mgo-fmt\033[0m               Format and organize imports                            ║"
-  echo    "║                                                                              ║"
-  echo -e "║  \033[32msupa-start\033[0m           Start local Supabase stack                             ║"
-  echo -e "║  \033[32msupa-stop\033[0m            Stop local Supabase stack                              ║"
-  echo -e "║  \033[32msupa-db-reset\033[0m        Reset and reapply all migrations                       ║"
-  echo -e "║  \033[32msupa-db-push\033[0m         Push schema changes to local DB                        ║"
-  echo    "║                                                                              ║"
-  echo -e "║  \033[33mTip:\033[0m Use \033[32mdev-help\033[0m to show this message again                               ║"
-  echo    "╚══════════════════════════════════════════════════════════════════════════════╝"
-  echo
-}
-
-alias dev-help="show_help"
-
-# === Colorful Prompt ===
-PS1='\[\033[38;5;39m\]\u\[\033[0m\]@\[\033[38;5;42m\]\h\[\033[0m\] \[\033[38;5;244m\]\w\[\033[0m\]\n\$ '
-
-# Show help on interactive terminals
-if [[ $- == *i* ]]; then
-    show_help
-fi
-EOF
-
-# Verify tool installations
-echo -e "${CYAN}[*] Verifying installed tools${RESET}"
-tools=("goimports" "golangci-lint" "gosec" "govulncheck" "gofumpt" "staticcheck")
-
-for tool in "${tools[@]}"; do
-    if command -v "$tool" &>/dev/null; then
-        version=$(eval "$tool --version 2>/dev/null || $tool version 2>/dev/null || echo 'installed'")
-        echo -e "${GREEN}[+] $tool: ${GRAY}$version${RESET}"
-    else
-        echo -e "${RED}[-] $tool: not found${RESET}"
+        echo -e "${YELLOW}[!] Failed to install $tool_name${RESET}"
     fi
 done
 
-# Set correct permissions for Go workspace
-echo -e "${CYAN}[*] Setting up Go workspace permissions${RESET}"
-sudo chown -R vscode:vscode "$GOPATH" 2>/dev/null || true
-chmod -R 755 "$GOPATH" 2>/dev/null || true
+# Set up bash environment for future shells
+echo -e "${CYAN}[*] Setting up bash environment${RESET}"
 
-# Download Go dependencies if go.mod exists
+# Add environment setup to .bashrc (append, don't overwrite)
+if ! grep -q "Subosity Installer Development Environment" "$HOME/.bashrc" 2>/dev/null; then
+    cat >> "$HOME/.bashrc" << 'EOF'
+
+# === Subosity Installer Development Environment ===
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
+# Load GVM
+if [[ -s "$HOME/.gvm/scripts/gvm" ]]; then
+    source "$HOME/.gvm/scripts/gvm" 2>/dev/null || true
+    gvm use go1.23.4 &>/dev/null || true
+fi
+
+# Development aliases
+alias ll="ls -la"
+alias go-build="go build -v ./..."
+alias go-test="go test -v ./..."
+alias go-lint="golangci-lint run"
+alias go-fmt="gofmt -s -w . && goimports -w ."
+
+# Installer aliases
+alias installer-build="make build"
+alias installer-test="make test"
+alias installer-container="make build-container"
+
+# Colorful prompt
+PS1='\[\033[38;5;39m\]\u\[\033[0m\]@\[\033[38;5;42m\]\h\[\033[0m\] \[\033[38;5;244m\]\w\[\033[0m\]\n\$ '
+EOF
+fi
+
+# Set correct permissions and download dependencies
+sudo chown -R vscode:vscode "$GOPATH" 2>/dev/null || true
+
 if [[ -f "/workspaces/subosity-installer/go.mod" ]]; then
     echo -e "${GREEN}[+] Downloading Go dependencies${RESET}"
+    # Temporarily disable strict error checking for GVM's cd function
+    set +euo pipefail
     cd /workspaces/subosity-installer
+    set -euo pipefail
     go mod download
-    echo -e "${BLUE}[i] Go dependencies downloaded${RESET}"
 fi
 
-echo -e "${GREEN}[+] Dev environment setup complete!${RESET}"
-echo -e "${CYAN}[*] Go version: $(go version)${RESET}"
-echo -e "${CYAN}[*] GOROOT: $GOROOT${RESET}"
-echo -e "${CYAN}[*] GOPATH: $GOPATH${RESET}"
+# Final verification and status report
+echo -e "${CYAN}[*] Performing final verification checks${RESET}"
 
-# Display available make targets for development
-echo -e "${CYAN}[*] Available make targets:${RESET}"
-if [[ -f "/workspaces/subosity-installer/Makefile" ]]; then
-    make -f "/workspaces/subosity-installer/Makefile" help 2>/dev/null || \
-    echo -e "${GRAY}    Run 'make' to see available targets${RESET}"
+# Check Go environment
+echo -e "${CYAN}[*] Verifying Go environment${RESET}"
+if command -v go >/dev/null 2>&1; then
+    go_version=$(go version 2>/dev/null || echo "unknown")
+    echo -e "${GREEN}[+] Go: $go_version${RESET}"
+    echo -e "${GRAY}    GOROOT: $GOROOT${RESET}"
+    echo -e "${GRAY}    GOPATH: $GOPATH${RESET}"
 else
-    echo -e "${GRAY}    Makefile not found - you may need to create build targets${RESET}"
+    echo -e "${RED}[-] Go: not found in PATH${RESET}"
 fi
+
+# Check GVM
+echo -e "${CYAN}[*] Verifying GVM environment${RESET}"
+if [[ -s "$GVM_ROOT/scripts/gvm" ]]; then
+    echo -e "${GREEN}[+] GVM: installed at $GVM_ROOT${RESET}"
+    # Temporarily relax error handling for GVM list
+    set +euo pipefail
+    installed_versions=$(gvm list 2>/dev/null | grep -c "go[0-9]" || echo "0")
+    set -euo pipefail
+    echo -e "${GRAY}    Installed Go versions: $installed_versions${RESET}"
+else
+    echo -e "${RED}[-] GVM: not found${RESET}"
+fi
+
+# Check development tools
+echo -e "${CYAN}[*] Verifying development tools${RESET}"
+dev_tools=("goimports" "golangci-lint" "govulncheck" "gofumpt" "staticcheck")
+for tool in "${dev_tools[@]}"; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        tool_path=$(which "$tool" 2>/dev/null || echo "unknown")
+        echo -e "${GREEN}[+] $tool: ${GRAY}$tool_path${RESET}"
+    else
+        echo -e "${YELLOW}[!] $tool: not found${RESET}"
+    fi
+done
+
+# Check Docker
+echo -e "${CYAN}[*] Verifying Docker environment${RESET}"
+if command -v docker >/dev/null 2>&1; then
+    if docker info >/dev/null 2>&1; then
+        docker_version=$(docker --version 2>/dev/null || echo "unknown")
+        echo -e "${GREEN}[+] Docker: $docker_version (daemon running)${RESET}"
+    else
+        echo -e "${YELLOW}[!] Docker: installed but daemon not accessible${RESET}"
+    fi
+else
+    echo -e "${RED}[-] Docker: not found${RESET}"
+fi
+
+# Check Git configuration
+echo -e "${CYAN}[*] Verifying Git configuration${RESET}"
+if command -v git >/dev/null 2>&1; then
+    git_version=$(git --version 2>/dev/null || echo "unknown")
+    git_user=$(git config --global user.name 2>/dev/null || echo "not set")
+    git_email=$(git config --global user.email 2>/dev/null || echo "not set")
+    echo -e "${GREEN}[+] Git: $git_version${RESET}"
+    echo -e "${GRAY}    User: $git_user${RESET}"
+    echo -e "${GRAY}    Email: $git_email${RESET}"
+else
+    echo -e "${RED}[-] Git: not found${RESET}"
+fi
+
+# Check if aliases are working
+echo -e "${CYAN}[*] Verifying development aliases${RESET}"
+if grep -q "go-build" "$HOME/.bashrc" 2>/dev/null; then
+    echo -e "${GREEN}[+] Development aliases: configured in .bashrc${RESET}"
+    echo -e "${GRAY}    Available: go-build, go-test, go-lint, go-fmt${RESET}"
+    echo -e "${GRAY}    Available: installer-build, installer-test, installer-container${RESET}"
+else
+    echo -e "${YELLOW}[!] Development aliases: not found in .bashrc${RESET}"
+fi
+
+# Test a simple Go command
+echo -e "${CYAN}[*] Testing Go functionality${RESET}"
+if command -v go >/dev/null 2>&1; then
+    # Test go env command
+    if go env GOROOT >/dev/null 2>&1; then
+        goroot_test=$(go env GOROOT 2>/dev/null || echo "unknown")
+        gopath_test=$(go env GOPATH 2>/dev/null || echo "unknown")
+        echo -e "${GREEN}[+] Go commands: working correctly${RESET}"
+        echo -e "${GRAY}    go env GOROOT: $goroot_test${RESET}"
+        echo -e "${GRAY}    go env GOPATH: $gopath_test${RESET}"
+    else
+        echo -e "${YELLOW}[!] Go commands: installed but not responding${RESET}"
+    fi
+else
+    echo -e "${RED}[-] Go commands: cannot test (go not found)${RESET}"
+fi
+
+# Summary
+echo
+echo -e "${GREEN}[+] Dev environment setup complete!${RESET}"
+echo -e "${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${RESET}"
+echo -e "${BLUE}║${RESET}                       ${CYAN}🚀 Development Environment Ready${RESET}                        ${BLUE}║${RESET}"
+echo -e "${BLUE}╠══════════════════════════════════════════════════════════════════════════════╣${RESET}"
+echo -e "${BLUE}║${RESET} ${GRAY}• Start a new terminal to use the configured environment${RESET}               ${BLUE}║${RESET}"
+echo -e "${BLUE}║${RESET} ${GRAY}• Use 'source ~/.bashrc' to load environment in current terminal${RESET}       ${BLUE}║${RESET}"
+echo -e "${BLUE}║${RESET} ${GRAY}• Run 'make help' to see available build targets${RESET}                      ${BLUE}║${RESET}"
+echo -e "${BLUE}║${RESET} ${GRAY}• Use development aliases: go-build, go-test, go-lint, etc.${RESET}            ${BLUE}║${RESET}"
+echo -e "${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${RESET}"
+echo
